@@ -54,6 +54,15 @@ export function writeConfig(patch: Partial<HarnessConfig>): HarnessConfig {
   return next;
 }
 
+/** Wipe the persisted config back to first-run defaults so the app boots into
+ *  onboarding again. Used by the "reset & start over" flow. */
+export function resetConfig(): HarnessConfig {
+  const p = configPath();
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify(DEFAULTS, null, 2), 'utf8');
+  return { ...DEFAULTS };
+}
+
 /** Auto-suggested command string given current autoMode preference. */
 export function commandForAutoMode(config: HarnessConfig): string {
   if (config.autoMode) {

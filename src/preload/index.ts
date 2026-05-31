@@ -182,9 +182,9 @@ const api = {
   hiveSend: (msg: Partial<HiveMessage>, from?: string): Promise<{ ok: boolean; error?: string; message?: HiveMessage }> =>
     ipcRenderer.invoke('hive:send', msg, from),
   onHiveHookEvent: (
-    cb: (e: { agentId?: string; event: string; tool?: string; notificationType?: string; source?: string }) => void
+    cb: (e: { agentId?: string; event: string; tool?: string; notificationType?: string; source?: string; message?: string }) => void
   ): (() => void) => {
-    const listener = (_e: IpcRendererEvent, payload: { agentId?: string; event: string; tool?: string; notificationType?: string; source?: string }) => cb(payload);
+    const listener = (_e: IpcRendererEvent, payload: { agentId?: string; event: string; tool?: string; notificationType?: string; source?: string; message?: string }) => cb(payload);
     ipcRenderer.on('hive:hookEvent', listener);
     return () => ipcRenderer.removeListener('hive:hookEvent', listener);
   },
@@ -201,7 +201,12 @@ const api = {
     return () => ipcRenderer.removeListener('app:closeRequested', listener);
   },
   confirmClose: (): Promise<void> => ipcRenderer.invoke('app:confirmClose'),
-  cancelClose: (): Promise<void> => ipcRenderer.invoke('app:cancelClose')
+  cancelClose: (): Promise<void> => ipcRenderer.invoke('app:cancelClose'),
+
+  // ─── Reset ─────────────────────────────────────────────────────────────────
+  /** Wipe all hive data + the memory palace, reset config, and relaunch the app
+   *  into onboarding. The process exits, so this promise never resolves. */
+  resetAll: (): Promise<void> => ipcRenderer.invoke('app:resetAll')
 };
 
 contextBridge.exposeInMainWorld('cth', api);

@@ -29,6 +29,16 @@ export class PtyManager {
     this.webContents = wc;
   }
 
+  /** Send to the renderer only if it's still alive. During app quit, killing a
+   *  PTY fires onExit asynchronously — by then app.quit() may have destroyed the
+   *  window, and `.send()` on a destroyed webContents throws "Object has been
+   *  destroyed", which surfaces as the main-process crash dialog. Guard it. */
+  private safeSend(channel: string, payload: unknown): void {
+    const wc = this.webContents;
+    if (!wc || wc.isDestroyed()) return;
+    try { wc.send(channel, payload); } catch { /* window tore down mid-send */ }
+  }
+
   /** Resolve a bare command (e.g. 'claude') against the user's PATH +
    *  common install locations. Needed because Electron's spawn env on
    *  macOS launches without the user's interactive shell PATH. */
@@ -97,10 +107,10 @@ export class PtyManager {
       this.sessions.set(opts.id, { id: opts.id, proc, cwd: opts.cwd, command: resolved });
 
       proc.onData((data) => {
-        this.webContents?.send(`pty:data:${opts.id}`, data);
+        this.safeSend(`pty:data:${opts.id}`, data);
       });
       proc.onExit(({ exitCode, signal }) => {
-        this.webContents?.send(`pty:exit:${opts.id}`, { exitCode, signal });
+        this.safeSend(`pty:exit:${opts.id}`, { exitCode, signal });
         this.sessions.delete(opts.id);
       });
 

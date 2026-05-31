@@ -47,10 +47,15 @@ export function useHive(config: HarnessConfig | null): void {
   useEffect(() => {
     if (!config?.onboardingComplete || !config.harnessHome) return;
     let cancelled = false;
+    useStore.getState().setGodStatus('booting');
     const t = setTimeout(async () => {
       if (cancelled) return;
       const live = await window.cth.listPtys().catch(() => []);
-      if (cancelled || live.some((p) => p.id === GOD_PTY)) return; // already running
+      if (live.some((p) => p.id === GOD_PTY)) { // already running — keep restored entry
+        if (!cancelled) useStore.getState().setGodStatus('ready');
+        return;
+      }
+      if (cancelled) return;
       useStore.getState().removeAgent(GOD_ID); // clear any stale restored entry
 
       const command = buildSpawnCommand(config);
@@ -64,7 +69,8 @@ export function useHive(config: HarnessConfig | null): void {
         rows: 30,
         hive: { id: GOD_ID, name: 'Michael', cwd: config.harnessHome!, isGod: true, role: 'orchestrator (god)' }
       });
-      if (!res.ok || cancelled) return;
+      if (cancelled) return;
+      if (!res.ok) { useStore.getState().setGodStatus('failed'); return; }
       const god: Agent = {
         id: GOD_ID,
         name: 'Michael',
@@ -84,6 +90,7 @@ export function useHive(config: HarnessConfig | null): void {
         recentTextTs: Date.now()
       };
       useStore.getState().addAgent(god);
+      useStore.getState().setGodStatus('ready');
     }, 1200);
     return () => { cancelled = true; clearTimeout(t); };
   }, [config?.onboardingComplete, config?.harnessHome]);
@@ -107,10 +114,30 @@ export function useHive(config: HarnessConfig | null): void {
       } else if (e.event === 'Stop' || e.event === 'SubagentStop') {
         updateAgent(e.agentId, { status: 'idle', action: 'idle', carrying: undefined });
       } else if (e.event === 'Notification') {
-        // Only the god agent escalates to the human ("needs you"). Sub-agents
-        // are autonomous — a notification means they're parked waiting on god,
-        // not on you, so they read as "waiting" rather than "blocked".
-        updateAgent(e.agentId, { status: self.isGod ? 'blocked' : 'waiting' });
+        // Claude Code fires Notification for two very different situations:
+        //   1. it genuinely needs the human (a permission / approval prompt), or
+        //   2. the prompt has merely gone idle ("Claude is waiting for your
+        //      input") — i.e. the agent answered and has nothing queued.
+        // Only (1) is a real "needs you". Treating (2) as blocked made Michael
+        // march to the door with a red "!" right after finishing, so detect the
+        // idle case and let him linger on the floor instead.
+        const msg = (e.message ?? '').toLowerCase();
+        const idleWaiting = !msg
+          || msg.includes('waiting for your input')
+          || msg.includes('is idle')
+          || msg.includes('waiting for input');
+        const needsHuman = msg.includes('permission')
+          || msg.includes('approve')
+          || msg.includes('confirm')
+          || msg.includes('needs your');
+        if (needsHuman && !idleWaiting) {
+          // Only the god agent escalates to the human; sub-agents are autonomous
+          // and read as "waiting" (parked on god, not on you).
+          updateAgent(e.agentId, { status: self.isGod ? 'blocked' : 'waiting' });
+        } else {
+          // Idle notification — responded, nothing to do. Linger, don't flag.
+          updateAgent(e.agentId, { status: 'idle', action: 'idle', carrying: undefined });
+        }
       }
     });
   }, []);

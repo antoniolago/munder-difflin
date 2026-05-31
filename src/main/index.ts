@@ -1,9 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { spawn } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { PtyManager, type SpawnOptions } from './pty';
 import {
-  readConfig, writeConfig, ensureHarnessHome,
+  readConfig, writeConfig, resetConfig, ensureHarnessHome,
   type HarnessConfig
 } from './config';
 import { listDir, readFileText, writeFileText } from './fs';
@@ -18,9 +19,9 @@ const isDev = !!process.env.ELECTRON_RENDERER_URL;
 const ptyManager = new PtyManager();
 const hive = new HiveManager(
   () => readConfig().harnessHome,
-  (channel, payload) => mainWindow?.webContents?.send(channel, payload)
+  (channel, payload) => { try { liveWebContents()?.send(channel, payload); } catch { /* window tore down */ } }
 );
-const hookServer = new HookServer(hive, () => mainWindow?.webContents ?? null);
+const hookServer = new HookServer(hive, () => liveWebContents());
 const memory = new MemoryManager(
   () => readConfig().harnessHome,
   () => { const c = readConfig(); return { enabled: c.semanticMemory !== false, model: c.embeddingModel ?? 'minilm' }; }
@@ -29,6 +30,16 @@ let mainWindow: BrowserWindow | null = null;
 
 /** When true, skip the quit interceptor (user already confirmed). */
 let allowQuit = false;
+
+/** The live renderer webContents, or null if the window is gone/destroyed.
+ *  Anything that emits to the renderer from a timer/socket/child callback must
+ *  route through here — during quit the window can be destroyed while those
+ *  callbacks are still in flight, and `.send()` on a destroyed webContents
+ *  throws "Object has been destroyed" (the main-process crash dialog). */
+function liveWebContents(): Electron.WebContents | null {
+  const wc = mainWindow?.webContents;
+  return wc && !wc.isDestroyed() ? wc : null;
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -226,14 +237,39 @@ ipcMain.handle('hive:mineNow', () => { memory.mineNow(); return { ok: true }; })
 // ─── IPC: quit confirmation ─────────────────────────────────────────────────
 ipcMain.handle('app:confirmClose', () => {
   allowQuit = true;
-  hive.stopRouter();
-  hookServer.stop();
-  memory.stop();
-  ptyManager.killAll();
+  // Each teardown step is best-effort: a throw here (e.g. a dying child or a
+  // half-torn-down socket) must never abort the quit or pop a crash dialog.
+  try { hive.stopRouter(); } catch (e) { console.error('[quit] stopRouter:', e); }
+  try { hookServer.stop(); } catch (e) { console.error('[quit] hookServer.stop:', e); }
+  try { memory.stop(); } catch (e) { console.error('[quit] memory.stop:', e); }
+  try { ptyManager.killAll(); } catch (e) { console.error('[quit] killAll:', e); }
   app.quit();
 });
 ipcMain.handle('app:cancelClose', () => {
   // no-op — modal will close on the renderer side
+});
+
+// ─── IPC: full reset (wipe data + config, relaunch into onboarding) ──────────
+ipcMain.handle('app:resetAll', () => {
+  allowQuit = true;
+  // Tear everything down first so nothing writes back into the dirs we wipe.
+  try { hive.stopRouter(); } catch (e) { console.error('[reset] stopRouter:', e); }
+  try { hookServer.stop(); } catch (e) { console.error('[reset] hookServer.stop:', e); }
+  try { memory.stop(); } catch (e) { console.error('[reset] memory.stop:', e); }
+  try { ptyManager.killAll(); } catch (e) { console.error('[reset] killAll:', e); }
+  // Erase the hive (Michael's + every agent's memory, inboxes, tasks, board,
+  // git history) and the semantic-memory palace. Only these harness-created
+  // subdirs are removed — never the user's whole harnessHome folder.
+  for (const dir of [hive.root(), memory.palacePath()]) {
+    if (!dir) continue;
+    try { rmSync(dir, { recursive: true, force: true }); }
+    catch (e) { console.error('[reset] rm', dir, e); }
+  }
+  // Back to first-run defaults, then relaunch clean so all in-memory services
+  // re-bootstrap from scratch and the renderer lands on onboarding.
+  resetConfig();
+  app.relaunch();
+  app.exit(0);
 });
 
 app.whenReady().then(() => {

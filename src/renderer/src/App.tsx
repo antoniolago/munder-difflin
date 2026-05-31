@@ -9,8 +9,10 @@ import { MemoryPanel } from '@/components/MemoryPanel';
 import { AgentDetailPanel } from '@/components/AgentDetailPanel';
 import { AgentStrip } from '@/components/AgentStrip';
 import { AddAgentModal } from '@/components/AddAgentModal';
+import { MichaelBooting } from '@/components/MichaelBooting';
 import { OnboardingWizard } from '@/components/OnboardingWizard';
 import { QuitWarningModal } from '@/components/QuitWarningModal';
+import { SettingsModal } from '@/components/SettingsModal';
 import { PixelPanel } from '@/components/PixelPanel';
 import { PixelButton } from '@/components/PixelButton';
 import { Icon } from '@/components/Icon';
@@ -25,12 +27,14 @@ export function App() {
   const agentCount = agents.length;
   const addAgentOpen = useStore(s => s.addAgentOpen);
   const setAddAgentOpen = useStore(s => s.setAddAgentOpen);
+  const godStatus = useStore(s => s.godStatus);
   const fullscreenAgentId = useStore(s => s.fullscreenAgentId);
   const fullscreenFilePath = useStore(s => s.fullscreenFilePath);
   const sidebarWidth = useStore(s => s.sidebarWidth);
   const setSidebarWidth = useStore(s => s.setSidebarWidth);
 
   const [config, setConfig] = useState<HarnessConfig | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [quitWarn, setQuitWarn] = useState<{ ptyCount: number } | null>(null);
   const [vpWidth, setVpWidth] = useState<number>(window.innerWidth);
 
@@ -134,6 +138,21 @@ export function App() {
         }}>
           v0.1 · {config.autoMode ? 'auto mode on' : 'auto mode off'}
         </span>
+        <button
+          className="cth-titlebar-nodrag"
+          onClick={() => setSettingsOpen(true)}
+          title="Settings"
+          aria-label="Settings"
+          style={{
+            marginLeft: 'auto',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 24, height: 24, padding: 0,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: 'var(--cth-ink-700)'
+          }}
+        >
+          <Icon name="gear" />
+        </button>
       </div>
 
       <div style={{
@@ -146,7 +165,8 @@ export function App() {
           <OfficeFloor />
           <ApprovalsPanel />
           <MemoryPanel />
-          {agentCount === 0 && (
+          {agentCount === 0 && godStatus === 'booting' && <MichaelBooting />}
+          {agentCount === 0 && godStatus !== 'booting' && (
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -182,6 +202,21 @@ export function App() {
         }}>
           {agent ? (
             <AgentDetailPanel agent={agent} />
+          ) : godStatus === 'booting' ? (
+            <PixelPanel variant="default" noPadding style={{
+              padding: 16, height: '100%',
+              display: 'flex', flexDirection: 'column',
+              justifyContent: 'center', alignItems: 'center', gap: 12
+            }}>
+              <div style={{
+                fontFamily: 'var(--cth-font-display)', fontSize: 10, lineHeight: '14px',
+                color: 'var(--cth-ink-500)'
+              }}>WAKING THE FLOOR</div>
+              <p style={{ margin: 0, fontSize: 14, textAlign: 'center', color: 'var(--cth-ink-700)' }}>
+                Michael is clocking in.<br />
+                The terminal will land here once he's seated.
+              </p>
+            </PixelPanel>
           ) : (
             <PixelPanel variant="default" noPadding style={{
               padding: 16, height: '100%',
@@ -210,6 +245,10 @@ export function App() {
 
       {addAgentOpen && (
         <AddAgentModal onClose={() => setAddAgentOpen(false)} config={config} />
+      )}
+
+      {settingsOpen && (
+        <SettingsModal config={config} onClose={() => setSettingsOpen(false)} />
       )}
 
       {quitWarn && (

@@ -27,6 +27,9 @@ interface HookPayload {
   prompt?: string;
   source?: string;
   notification_type?: string;
+  /** Notification hook text, e.g. "Claude is waiting for your input" (idle) vs a
+   *  permission request. Used to tell "needs you" from "just done / lingering". */
+  message?: string;
 }
 
 export class HookServer {
@@ -94,7 +97,8 @@ export class HookServer {
       event,
       tool: p.tool_name,
       notificationType: p.notification_type,
-      source: p.source
+      source: p.source,
+      message: p.message
     });
   }
 }

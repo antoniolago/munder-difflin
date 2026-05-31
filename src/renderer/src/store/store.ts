@@ -65,6 +65,12 @@ export interface FeedEntry {
 
 export type SidebarTab = 'terminal' | 'files';
 
+/** Lifecycle of the god agent ("Michael") bootstrap on launch.
+ *  'booting' until his PTY is confirmed live, then 'ready' (or 'failed' if the
+ *  spawn errored). The empty-floor UI shows a loader while 'booting' so users
+ *  don't see the "add agent" prompt before Michael has clocked in. */
+export type GodStatus = 'booting' | 'ready' | 'failed';
+
 interface State {
   agents: Agent[];
   selectedId: string | null;
@@ -74,6 +80,8 @@ interface State {
   fullscreenFilePath: string | null;
   sidebarWidth: number;
   sidebarTab: SidebarTab;
+  godStatus: GodStatus;
+  setGodStatus: (status: GodStatus) => void;
   select: (id: string) => void;
   updateAgent: (id: string, patch: Partial<Agent>) => void;
   pushFeed: (id: string, line: string) => void;
@@ -165,6 +173,8 @@ export const useStore = create<State>((set) => ({
   fullscreenFilePath: null,
   sidebarWidth: initialSidebarWidth,
   sidebarTab: initialSidebarTab,
+  godStatus: 'booting',
+  setGodStatus: (status) => set({ godStatus: status }),
   select: (id) => set((s) => { persistAgents(s.agents, id); return { selectedId: id }; }),
   updateAgent: (id, patch) =>
     set((s) => ({ agents: s.agents.map(a => a.id === id ? { ...a, ...patch } : a) })),

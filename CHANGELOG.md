@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-06-01
+
+### Added
+- **Settings panel** (title-bar gear) with a **Reset & start over** action that wipes
+  Michael's memories, the entire hive (every agent, message, task, and the board), and
+  the semantic-memory palace, then relaunches the app into onboarding.
+- Boot loader ("clocking in") shown while the GOD agent initializes, so returning users
+  no longer see the empty "add agent" screen during startup.
+
+### Fixed
+- Crash dialog on quit caused by sending IPC to an already-destroyed window during
+  teardown; all renderer sends are now destroyed-safe and shutdown steps are best-effort.
+- Michael no longer marches to the door flagged "needs you" right after finishing a turn —
+  idle "waiting for input" notifications now let him linger at his desk instead of
+  escalating as a blocked/needs-action state.
+
+## [Brand & rename]
+
 ### Added
 - Brand identity: **Munder Difflin** — logo (`docs/logo.svg`), square mark
   (`docs/logo-mark.svg`), and hero banner (`docs/banner.svg`).
