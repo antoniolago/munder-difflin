@@ -19,6 +19,8 @@ export interface HarnessConfig {
   semanticMemory: boolean;
   /** Embedding model for the palace: lightweight 'minilm' or multilingual 'embeddinggemma'. */
   embeddingModel: 'minilm' | 'embeddinggemma';
+  /** Fire native desktop notifications on agent lifecycle events (idle finish / waiting for input). */
+  notifications?: boolean;
 }
 
 const DEFAULTS: HarnessConfig = {
@@ -28,7 +30,8 @@ const DEFAULTS: HarnessConfig = {
   autoMode: true,
   defaultCommand: 'claude',
   semanticMemory: true,
-  embeddingModel: 'minilm'
+  embeddingModel: 'minilm',
+  notifications: false
 };
 
 function configPath(): string {
