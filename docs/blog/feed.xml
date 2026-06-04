@@ -24,6 +24,14 @@
     <summary>Install Munder Difflin on macOS, Windows, or Linux and put a hive of Claude Code agents to work on ambitious, long-horizon tasks — start to finish.</summary>
   </entry>
   <entry>
+    <title>MCP Tool Poisoning: How to Secure the Model Context Protocol</title>
+    <link href="https://munderdiffl.in/blog/mcp-security-tool-poisoning/" />
+    <id>https://munderdiffl.in/blog/mcp-security-tool-poisoning/</id>
+    <published>2026-06-05T00:00:00.000Z</published>
+    <updated>2026-06-05T00:00:00.000Z</updated><category term="Guides" />
+    <summary>How the Model Context Protocol gets attacked — tool poisoning, rug pulls, command injection — and the layered defenses that secure your MCP tools.</summary>
+  </entry>
+  <entry>
     <title>Running AI Agents Safely: Permission Modes and Sandboxing</title>
     <link href="https://munderdiffl.in/blog/agent-security-and-sandboxing/" />
     <id>https://munderdiffl.in/blog/agent-security-and-sandboxing/</id>
@@ -478,13 +486,5 @@
     <published>2026-06-02T00:00:00.000Z</published>
     <updated>2026-06-02T00:00:00.000Z</updated><category term="Concepts" />
     <summary>Claude Code agents explained in plain English — what an agent actually is, how subagents differ, and the leap from one agent to a coordinated team.</summary>
-  </entry>
-  <entry>
-    <title>Why Local-First Matters for Your AI Agents</title>
-    <link href="https://munderdiffl.in/blog/why-local-first-matters-for-ai-agents/" />
-    <id>https://munderdiffl.in/blog/why-local-first-matters-for-ai-agents/</id>
-    <published>2026-06-02T00:00:00.000Z</published>
-    <updated>2026-06-02T00:00:00.000Z</updated><category term="Use Cases" />
-    <summary>The control, privacy, and cost case for keeping your AI agents and their memory on your own machine — and what cloud orchestration quietly costs.</summary>
   </entry>
 </feed>
