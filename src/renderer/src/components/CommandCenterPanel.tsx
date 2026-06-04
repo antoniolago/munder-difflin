@@ -8,6 +8,7 @@ import { MessageQueueComposer } from './MessageQueueComposer';
 import { TasksKanban } from './TasksKanban';
 import { disposeTerminal } from './terminalPool';
 import { Icon } from './Icon';
+import { MemoryGraphPanel } from './MemoryGraphPanel';
 import { useStore, type Agent } from '@/store/store';
 import { usePtyParser } from '@/hooks/usePtyParser';
 import { buildSpawnCommand, AGENT_MODELS } from '@/store/config';
@@ -17,7 +18,7 @@ import { buildSpawnCommand, AGENT_MODELS } from '@/store/config';
  *  per-agent model + dispatch + assistant access), a memory view, and a live
  *  activity feed / board / usage meter. */
 
-type CCTab = 'terminal' | 'floor' | 'tasks' | 'memory' | 'activity' | 'handbook';
+type CCTab = 'terminal' | 'floor' | 'tasks' | 'memory' | 'graph' | 'activity' | 'handbook';
 
 /** A recurring auto-dispatched mission (mirrors the main-process config type). */
 interface ScheduledMission {
@@ -43,6 +44,7 @@ const TABS: { key: CCTab; label: string; icon: Parameters<typeof Icon>[0]['name'
   { key: 'floor', label: 'floor', icon: 'mcp' },
   { key: 'tasks', label: 'tasks', icon: 'check' },
   { key: 'memory', label: 'memory', icon: 'sparkle' },
+  { key: 'graph', label: 'graph', icon: 'web' },
   { key: 'activity', label: 'activity', icon: 'bell' },
   { key: 'handbook', label: 'commands', icon: 'code' }
 ];
@@ -53,6 +55,8 @@ export function CommandCenterPanel({ agent }: { agent: Agent }) {
   // counter bumps so re-assigning the same card re-seeds the textarea (the seed
   // string alone wouldn't change). { seq } makes every assign distinct.
   const [dispatchSeed, setDispatchSeed] = useState<{ text: string; seq: number }>({ text: '', seq: 0 });
+  // Lifted so the memory-graph tab can jump to a specific agent's memory file.
+  const [selectedMemoryAgent, setSelectedMemoryAgent] = useState<string | null>(null);
   const updateAgent = useStore((s) => s.updateAgent);
   const setFullscreen = useStore((s) => s.setFullscreen);
   const fullscreenAgentId = useStore((s) => s.fullscreenAgentId);
@@ -147,7 +151,15 @@ export function CommandCenterPanel({ agent }: { agent: Agent }) {
             }}
           />
         )}
-        {tab === 'memory' && <MemoryTab godId={agent.id} />}
+        {tab === 'memory' && (
+          <MemoryTab godId={agent.id} who={selectedMemoryAgent ?? undefined} onWho={setSelectedMemoryAgent} />
+        )}
+        {tab === 'graph' && (
+          <MemoryGraphPanel
+            godId={agent.id}
+            onJumpToMemory={(id) => { setSelectedMemoryAgent(id); setTab('memory'); }}
+          />
+        )}
         {tab === 'activity' && <ActivityTab />}
         {tab === 'handbook' && <HandbookTab />}
       </div>
@@ -411,9 +423,12 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
 
 // ─── Memory tab ──────────────────────────────────────────────────────────────
 
-function MemoryTab({ godId }: { godId: string }) {
+function MemoryTab({ godId, who: controlledWho, onWho }: { godId: string; who?: string; onWho?: (id: string) => void }) {
   const agents = useStore((s) => s.agents);
-  const [who, setWho] = useState<string>(godId);
+  // Selection is controllable from the graph tab; falls back to local state.
+  const [internalWho, setInternalWho] = useState<string>(godId);
+  const who = controlledWho ?? internalWho;
+  const setWho = onWho ?? setInternalWho;
   const [mem, setMem] = useState('');
   const [query, setQuery] = useState('');
   const [searchOut, setSearchOut] = useState('');
