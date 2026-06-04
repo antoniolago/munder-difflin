@@ -56,6 +56,17 @@ export interface SpawnPtyOptions {
 
 export interface PtyExit { exitCode: number; signal?: number | undefined }
 
+/** A recurring auto-dispatched mission fired on an interval by the scheduler. */
+export interface ScheduledMission {
+  id: string;
+  label: string;
+  intervalMs: number;
+  to: string;
+  body: string;
+  enabled: boolean;
+  lastFiredAt?: number;
+}
+
 export interface HarnessConfig {
   onboardingComplete: boolean;
   harnessHome: string | null;
@@ -65,6 +76,7 @@ export interface HarnessConfig {
   defaultModel?: string;
   semanticMemory: boolean;
   embeddingModel: 'minilm' | 'embeddinggemma';
+  missions?: ScheduledMission[];
 }
 
 export interface MemoryStatus {
@@ -219,7 +231,12 @@ const api = {
   // ─── Reset ─────────────────────────────────────────────────────────────────
   /** Wipe all hive data + the memory palace, reset config, and relaunch the app
    *  into onboarding. The process exits, so this promise never resolves. */
-  resetAll: (): Promise<void> => ipcRenderer.invoke('app:resetAll')
+  resetAll: (): Promise<void> => ipcRenderer.invoke('app:resetAll'),
+
+  // ─── Scheduled missions (recurring auto-dispatch) ──────────────────────────
+  listMissions: (): Promise<ScheduledMission[]> => ipcRenderer.invoke('missions:list'),
+  saveMissions: (missions: ScheduledMission[]): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('missions:save', missions)
 };
 
 contextBridge.exposeInMainWorld('cth', api);
