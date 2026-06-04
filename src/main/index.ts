@@ -9,7 +9,8 @@ import {
 } from './config';
 import { listDir, readFileText, writeFileText } from './fs';
 import {
-  getBranch, getStatus, getLog, getBranches, getAheadBehind, isRepo
+  getBranch, getStatus, getLog, getBranches, getAheadBehind, isRepo,
+  addWorktree, removeWorktree
 } from './git';
 import { HiveManager, type AgentMeta, type HiveMessage } from './hive';
 import { HookServer } from './hooks';
@@ -31,6 +32,13 @@ let mainWindow: BrowserWindow | null = null;
 
 /** When true, skip the quit interceptor (user already confirmed). */
 let allowQuit = false;
+
+/** Agents spawned with `isolate: true` get a dedicated git worktree; this maps
+ *  the agent/pty id → the worktree path so we can tear it down on kill. */
+const worktreePaths = new Map<string, string>();
+/** id → the original repo cwd the worktree was created from (needed to run
+ *  `git worktree remove` from the parent tree, not the worktree itself). */
+const worktreeOrigins = new Map<string, string>();
 
 /** The live renderer webContents, or null if the window is gone/destroyed.
  *  Anything that emits to the renderer from a timer/socket/child callback must
@@ -95,9 +103,31 @@ function createWindow(): void {
 }
 
 // ─── IPC: pty lifecycle ─────────────────────────────────────────────────────
-ipcMain.handle('pty:spawn', (_evt, opts: SpawnOptions & { hive?: AgentMeta }) => {
+ipcMain.handle('pty:spawn', async (_evt, opts: SpawnOptions & { hive?: AgentMeta; isolate?: boolean }) => {
   if (!opts || typeof opts.id !== 'string' || typeof opts.cwd !== 'string' || typeof opts.command !== 'string') {
     return { ok: false, error: 'invalid SpawnOptions' };
+  }
+  // Git isolation: when requested and the cwd is a real repo, give this agent
+  // its own worktree on an `agent/<id>` branch so it can't clobber other agents'
+  // (or the user's) working tree. Best-effort — a failure falls back to the
+  // shared cwd rather than blocking the spawn.
+  if (opts.isolate === true && await isRepo(opts.cwd)) {
+    try {
+      const origCwd = opts.cwd;
+      const wtPath = join(readConfig().harnessHome ?? origCwd, 'worktrees', opts.hive?.id ?? opts.id);
+      const br = await getBranch(origCwd);
+      const baseBranch = 'current' in br && br.current ? br.current : 'main';
+      const wt = await addWorktree(origCwd, wtPath, baseBranch);
+      if (wt.ok) {
+        opts.cwd = wtPath;
+        worktreePaths.set(opts.id, wtPath);
+        worktreeOrigins.set(opts.id, origCwd);
+      } else {
+        console.error('[worktree] addWorktree failed:', wt.error);
+      }
+    } catch (e) {
+      console.error('[worktree] isolation failed:', e);
+    }
   }
   // If the agent carries hive metadata, provision its workspace and inject the
   // identity + protocol (extra --append-system-prompt args + AGENT_* env).
@@ -124,7 +154,20 @@ ipcMain.handle('pty:resize', (_evt, id: string, cols: number, rows: number) => {
 });
 ipcMain.handle('pty:kill', (_evt, id: string) => {
   if (typeof id !== 'string') return { ok: false, error: 'invalid id' };
-  return ptyManager.kill(id);
+  const res = ptyManager.kill(id);
+  // Tear down the agent's isolated worktree, if any. Best-effort and non-blocking:
+  // we don't await it so the kill result returns immediately, and removal errors
+  // (e.g. uncommitted work) are logged rather than surfaced to the renderer.
+  const wtPath = worktreePaths.get(id);
+  if (wtPath) {
+    const origCwd = worktreeOrigins.get(id) ?? wtPath;
+    worktreePaths.delete(id);
+    worktreeOrigins.delete(id);
+    void removeWorktree(origCwd, wtPath)
+      .then(r => { if (!r.ok) console.error('[worktree] removeWorktree failed:', r.error); })
+      .catch(e => console.error('[worktree] removeWorktree threw:', e));
+  }
+  return res;
 });
 ipcMain.handle('pty:list', () => ptyManager.list());
 
