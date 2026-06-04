@@ -104,6 +104,14 @@
     <summary>A code-grounded guide to how AI agents remember — the MemPalace mine loop, per-agent wings, and wake-up digest that give a Claude Code hive shared recall.</summary>
   </entry>
   <entry>
+    <title>How AI Agents Verify Their Own Work (Before Saying &#39;Done&#39;)</title>
+    <link href="https://munderdiffl.in/blog/how-ai-agents-verify-their-own-work/" />
+    <id>https://munderdiffl.in/blog/how-ai-agents-verify-their-own-work/</id>
+    <published>2026-06-04T00:00:00.000Z</published>
+    <updated>2026-06-04T00:00:00.000Z</updated><category term="Concepts" />
+    <summary>The discipline that makes an autonomous coding agent trustworthy: prove every claim, reproduce the green, and check the fix — not just the intent.</summary>
+  </entry>
+  <entry>
     <title>Keep Your Agent&#39;s Semantic Memory Clean: Don&#39;t Index the Config</title>
     <link href="https://munderdiffl.in/blog/keep-agent-semantic-memory-clean/" />
     <id>https://munderdiffl.in/blog/keep-agent-semantic-memory-clean/</id>
@@ -112,12 +120,52 @@
     <summary>A semantic memory layer is only as good as what you feed it — how an agent&#39;s recall got swamped by config and logs, and the .gitignore + prune fix.</summary>
   </entry>
   <entry>
+    <title>Local-First AI Agent Orchestration: How a Hive Runs Without a Cloud</title>
+    <link href="https://munderdiffl.in/blog/local-first-ai-agent-orchestration/" />
+    <id>https://munderdiffl.in/blog/local-first-ai-agent-orchestration/</id>
+    <published>2026-06-04T00:00:00.000Z</published>
+    <updated>2026-06-04T00:00:00.000Z</updated><category term="Orchestration" />
+    <summary>How local-first AI agent orchestration works under the hood — the loop, mailboxes, scheduler, and audit log that coordinate a hive on one machine.</summary>
+  </entry>
+  <entry>
+    <title>Building AI Dev Tools in the Open, On Purpose</title>
+    <link href="https://munderdiffl.in/blog/open-source-ai-tools-on-purpose/" />
+    <id>https://munderdiffl.in/blog/open-source-ai-tools-on-purpose/</id>
+    <published>2026-06-04T00:00:00.000Z</published>
+    <updated>2026-06-04T00:00:00.000Z</updated><category term="Concepts" />
+    <summary>Agents touch your code, keys, and memory. That&#39;s why agent tooling should be open source and local-first — so you can verify it, not just trust it.</summary>
+  </entry>
+  <entry>
+    <title>Overnight AI Coding: What&#39;s Realistic (and What&#39;s Not)</title>
+    <link href="https://munderdiffl.in/blog/overnight-ai-coding-realistic-expectations/" />
+    <id>https://munderdiffl.in/blog/overnight-ai-coding-realistic-expectations/</id>
+    <published>2026-06-04T00:00:00.000Z</published>
+    <updated>2026-06-04T00:00:00.000Z</updated><category term="Use Cases" />
+    <summary>An honest look at letting AI coding agents run overnight — what works today, where guardrails matter, and what still needs a human in the morning.</summary>
+  </entry>
+  <entry>
+    <title>Prompt Caching for AI Agents: Stop Paying for the Same Tokens Twice</title>
+    <link href="https://munderdiffl.in/blog/prompt-caching-for-ai-agents/" />
+    <id>https://munderdiffl.in/blog/prompt-caching-for-ai-agents/</id>
+    <published>2026-06-04T00:00:00.000Z</published>
+    <updated>2026-06-04T00:00:00.000Z</updated><category term="Guides" />
+    <summary>An agent re-sends the same prompt, tools, and context every turn. Prompt caching makes you pay for that prefix once — here&#39;s how to design for it.</summary>
+  </entry>
+  <entry>
     <title>Make a Hive Work While You Sleep: Scheduling Autonomous Agent Missions</title>
     <link href="https://munderdiffl.in/blog/scheduling-autonomous-agent-missions/" />
     <id>https://munderdiffl.in/blog/scheduling-autonomous-agent-missions/</id>
     <published>2026-06-04T00:00:00.000Z</published>
     <updated>2026-06-04T00:00:00.000Z</updated><category term="Orchestration" />
     <summary>How scheduled missions make a Claude Code hive work on a cadence — recurring requests that fire on an interval and land in an agent&#39;s queue, hands-free.</summary>
+  </entry>
+  <entry>
+    <title>A Small-Team Playbook for AI Coding Agents</title>
+    <link href="https://munderdiffl.in/blog/small-team-ai-agents-playbook/" />
+    <id>https://munderdiffl.in/blog/small-team-ai-agents-playbook/</id>
+    <published>2026-06-04T00:00:00.000Z</published>
+    <updated>2026-06-04T00:00:00.000Z</updated><category term="Guides" />
+    <summary>How a small team adopts a hive of AI coding agents without chaos — the roles to assign, the cadence to run, and the guardrails that keep it safe.</summary>
   </entry>
   <entry>
     <title>AEO for Dev Tools: Getting Cited by ChatGPT and Claude</title>
