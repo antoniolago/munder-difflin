@@ -217,6 +217,15 @@ export interface TelemetrySnapshot {
   spans: Record<string, ToolSpan[]>;
 }
 
+/** One captured user prompt from the SQLite command_history table. */
+export interface CommandHistoryEntry {
+  id: number;
+  agentId: string;
+  cwd: string | null;
+  text: string;
+  ts: number;
+}
+
 /** A GitHub issue, normalized for the renderer (labels/assignees flattened to names). */
 export interface GHIssue {
   number: number;
@@ -281,6 +290,12 @@ const api = {
     ipcRenderer.invoke('config:update', patch),
   ensureHarnessHome: (path: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('config:ensureHome', path),
+  /** Change the harness home folder. 'move' copies the existing hive + palace
+   *  into the new folder (old kept as a safety net); 'fresh' just re-points and
+   *  bootstraps an empty home. On success the app relaunches (never resolves);
+   *  on failure (e.g. copy error) returns { ok: false, error }. */
+  changeHome: (newHome: string, mode: 'move' | 'fresh'): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('config:changeHome', { newHome, mode }),
 
   // ─── Filesystem (sandboxed to cwd) ───────────────────────────────────────
   listDir: (root: string, rel: string): Promise<
@@ -321,6 +336,22 @@ const api = {
   memoryWakeUp: (wing?: string): Promise<{ ok: boolean; output: string; error?: string }> =>
     ipcRenderer.invoke('hive:memoryWakeUp', wing),
   mineNow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('hive:mineNow'),
+  /** Condense agent memory.md files (the janitor's missing half). With an id,
+   *  condense that agent on demand; without, run a full threshold scan. Returns
+   *  the per-agent outcomes ({ id, condensed, reason, oldBytes?, newBytes? }). */
+  reflectNow: (id?: string): Promise<Array<{ id: string; condensed: boolean; reason: string; oldBytes?: number; newBytes?: number }>> =>
+    ipcRenderer.invoke('memory:reflectNow', id),
+
+  // ─── Command history (SQLite — every prompt submitted to an agent) ─────────
+  /** Record one submitted prompt. Fire-and-forget from the prompt-detection hook. */
+  historyAdd: (entry: { agentId: string; cwd?: string; text: string }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('history:add', entry),
+  /** Most-recent-first history, optionally scoped to one agent. */
+  historyList: (agentId?: string, limit?: number): Promise<CommandHistoryEntry[]> =>
+    ipcRenderer.invoke('history:list', agentId, limit),
+  /** Substring search over prompt text, most-recent-first. */
+  historySearch: (query: string, limit?: number): Promise<CommandHistoryEntry[]> =>
+    ipcRenderer.invoke('history:search', query, limit),
   hiveSend: (msg: Partial<HiveMessage>, from?: string): Promise<{ ok: boolean; error?: string; message?: HiveMessage }> =>
     ipcRenderer.invoke('hive:send', msg, from),
 

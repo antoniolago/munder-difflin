@@ -134,6 +134,22 @@ export interface HarnessConfig {
   slackChannelId?: string;
   /** Local HTTP port the webhook server binds to (default 3847). */
   slackPort?: number;
+
+  // ─── Memory reflection (the janitor's condense half) ───────────────────────
+  /** Master toggle for the in-process MemoryReflector. Default on. */
+  reflectEnabled?: boolean;
+  /** How often to scan agent memory.md files for condensing (default 30 min). */
+  reflectIntervalMs?: number;
+  /** Condense when bytes exceed this percent of the 128 KB budget (matches the
+   *  janitor's TRIGGER_PCT). DECIDED: 50. */
+  reflectByteTriggerPct?: number;
+  /** ...OR when `## ` section count exceeds this (AND bytes > floor). DECIDED: 50. */
+  reflectSectionTrigger?: number;
+  /** Newest K verbatim `## ` sections kept untouched on each condense. */
+  reflectRecentKeep?: number;
+  /** Never condense a file smaller than this; also the section-trigger byte floor.
+   *  DECIDED: 16 KB. */
+  reflectMinBytes?: number;
 }
 
 const DEFAULTS: HarnessConfig = {
@@ -150,7 +166,16 @@ const DEFAULTS: HarnessConfig = {
   slackSigningSecret: undefined,
   slackBotToken: undefined,
   slackChannelId: undefined,
-  slackPort: undefined
+  slackPort: undefined,
+  // Memory reflection — preventive; nobody is over threshold today, so it sits
+  // dark until an agent's memory crosses one of these (the verify gate is the
+  // safety for the LLM step). Thresholds DECIDED by god 2026-06-06.
+  reflectEnabled: true,
+  reflectIntervalMs: 1_800_000,
+  reflectByteTriggerPct: 50,
+  reflectSectionTrigger: 50,
+  reflectRecentKeep: 12,
+  reflectMinBytes: 16_384
 };
 
 function configPath(): string {

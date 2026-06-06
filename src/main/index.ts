@@ -1,6 +1,6 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, Notification } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, screen, shell, Notification } from 'electron';
 import { spawn } from 'node:child_process';
-import { rmSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { rmSync, existsSync, readFileSync, readdirSync, statSync, cpSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { PtyManager, type SpawnOptions } from './pty';
 import {
@@ -17,6 +17,8 @@ import { HookServer } from './hooks';
 import { CircuitBreaker, type BreakerInput } from './breaker';
 import type { UsageProvider } from './usage';
 import { MemoryManager } from './memory';
+import { MemoryReflector, type ReflectSettings } from './reflect';
+import { PersistStore } from './db';
 import { enrichMessage } from './assistant';
 import { readAgentUsage } from './transcript';
 import { listIssues, listCIRuns } from './github';
@@ -66,6 +68,31 @@ const memory = new MemoryManager(
   () => readConfig().harnessHome,
   () => { const c = readConfig(); return { enabled: c.semanticMemory !== false, model: c.embeddingModel ?? 'minilm' }; }
 );
+/** Reads the reflect tunables from config each tick (defaults baked in here so a
+ *  pre-existing config.json without the keys still gets sane values). */
+function reflectSettings(): ReflectSettings {
+  const c = readConfig();
+  return {
+    enabled: c.reflectEnabled !== false,
+    intervalMs: c.reflectIntervalMs ?? 1_800_000,
+    byteTriggerPct: c.reflectByteTriggerPct ?? 50,
+    sectionTrigger: c.reflectSectionTrigger ?? 50,
+    recentKeep: c.reflectRecentKeep ?? 12,
+    minBytes: c.reflectMinBytes ?? 16_384
+  };
+}
+// Finishes the janitor's missing condense half: bounds each agent's memory.md
+// (Haiku tail-summary, backup→verify→atomic-swap) so it never grows unbounded.
+const reflector = new MemoryReflector(
+  () => readConfig().harnessHome,
+  () => readConfig().defaultCommand ?? 'claude',
+  () => memory.env(),
+  reflectSettings,
+  (event) => { try { hive.appendLog(event); } catch { /* best-effort */ } }
+);
+// Durable harness state (SQLite, main process). Phase A: window bounds (kv) +
+// net-new command history. Opened in whenReady, closed in the teardown blocks.
+const persist = new PersistStore();
 let mainWindow: BrowserWindow | null = null;
 
 /** When true, skip the quit interceptor (user already confirmed). */
@@ -451,12 +478,48 @@ function stopSlackServer(): void {
   slackServer = null;
 }
 
+/** The persisted main-window geometry (kv key `window.bounds`). */
+interface WindowBounds { x?: number; y?: number; width: number; height: number }
+
+const DEFAULT_WIN = { width: 1440, height: 900 };
+const MIN_WIN = { width: 1280, height: 800 };
+
+/** Validate + clamp restored bounds: enforce the minimum size, and drop a
+ *  position that no longer lands on any connected display (monitor unplugged) so
+ *  the window can't open off-screen. Returns null for unusable input. */
+function clampBounds(b: unknown): WindowBounds | null {
+  if (!b || typeof b !== 'object') return null;
+  const r = b as Partial<WindowBounds>;
+  if (typeof r.width !== 'number' || typeof r.height !== 'number') return null;
+  const width = Math.max(MIN_WIN.width, Math.round(r.width));
+  const height = Math.max(MIN_WIN.height, Math.round(r.height));
+  if (typeof r.x !== 'number' || typeof r.y !== 'number') return { width, height };
+  const x = Math.round(r.x), y = Math.round(r.y);
+  // Keep the position only if the window rect overlaps some display's work area.
+  const onScreen = screen.getAllDisplays().some((d) => {
+    const wa = d.workArea;
+    return x < wa.x + wa.width && x + width > wa.x && y < wa.y + wa.height && y + height > wa.y;
+  });
+  return onScreen ? { x, y, width, height } : { width, height };
+}
+
+/** Minimal trailing-edge debounce for the move/resize flood. */
+function debounce(fn: () => void, ms: number): () => void {
+  let t: NodeJS.Timeout | null = null;
+  return () => { if (t) clearTimeout(t); t = setTimeout(() => { t = null; fn(); }, ms); };
+}
+
 function createWindow(): void {
+  // Restore the last window geometry (kv), falling back to the default size.
+  let saved: WindowBounds | null = null;
+  try { saved = clampBounds(persist.getKv('window.bounds')); } catch { saved = null; }
+
   const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1280,
-    minHeight: 800,
+    width: saved?.width ?? DEFAULT_WIN.width,
+    height: saved?.height ?? DEFAULT_WIN.height,
+    ...(saved && saved.x !== undefined && saved.y !== undefined ? { x: saved.x, y: saved.y } : {}),
+    minWidth: MIN_WIN.width,
+    minHeight: MIN_WIN.height,
     title: 'Munder Difflin',
     backgroundColor: '#FFF8E7',
     titleBarStyle: 'hiddenInset',
@@ -470,6 +533,19 @@ function createWindow(): void {
   });
 
   mainWindow = win;
+
+  // Persist geometry as the user drags/resizes (debounced) and on close. Skip
+  // while maximized/minimized so a restore doesn't save the fullscreen rect.
+  const saveBounds = debounce(() => {
+    if (win.isDestroyed() || win.isMinimized() || win.isMaximized()) return;
+    try { persist.setKv('window.bounds', win.getBounds()); } catch { /* DB best-effort */ }
+  }, 400);
+  win.on('resized', saveBounds);
+  win.on('moved', saveBounds);
+  win.on('close', () => {
+    if (win.isDestroyed() || win.isMinimized() || win.isMaximized()) return;
+    try { persist.setKv('window.bounds', win.getBounds()); } catch { /* DB best-effort */ }
+  });
 
   win.once('ready-to-show', () => win.show());
 
@@ -646,6 +722,71 @@ ipcMain.handle('config:ensureHome', (_evt, path: unknown) => {
   return ensureHarnessHome(path);
 });
 
+// Change the harnessHome folder. Because every derived path (hive root, palace,
+// sock, agent dirs) resolves lazily through getHome(), the only real work is
+// optionally MOVING the existing hive + palace and relaunching so every service
+// re-binds against the new root. mode: 'move' copies the data (old kept as a
+// safety net), 'fresh' just re-points and bootstraps an empty home.
+ipcMain.handle('config:changeHome', async (_evt, payload: unknown) => {
+  const p = (payload ?? {}) as { newHome?: unknown; mode?: unknown };
+  if (typeof p.newHome !== 'string' || !p.newHome) return { ok: false, error: 'invalid newHome' };
+  const mode: 'move' | 'fresh' = p.mode === 'fresh' ? 'fresh' : 'move';
+  const newHome = resolve(p.newHome);
+  const oldRaw = readConfig().harnessHome;
+  const oldHome = oldRaw ? resolve(oldRaw) : null;
+
+  // Guard against same-folder / nested-folder (a move would self-copy forever).
+  if (oldHome) {
+    if (newHome === oldHome) return { ok: false, error: 'That is already the current home folder.' };
+    const a = newHome + sep, b = oldHome + sep;
+    if (a.startsWith(b) || b.startsWith(a)) {
+      return { ok: false, error: 'Pick a folder that is not inside (or a parent of) the current home.' };
+    }
+  }
+
+  const ensured = ensureHarnessHome(newHome);
+  if (!ensured.ok) return ensured;
+
+  // Tear down everything bound to the OLD root before copying, so nothing writes
+  // mid-copy — a live git commit into hive/.git would otherwise be copied as a
+  // half-written object and corrupt the moved repo.
+  try { clearMissionTimers(); } catch (e) { console.error('[changeHome] clearMissionTimers:', e); }
+  try { hive.stopRouter(); } catch (e) { console.error('[changeHome] stopRouter:', e); }
+  try { hookServer.stop(); } catch (e) { console.error('[changeHome] hookServer.stop:', e); }
+  try { stopSlackServer(); } catch (e) { console.error('[changeHome] slack.stop:', e); }
+  try { memory.stop(); } catch (e) { console.error('[changeHome] memory.stop:', e); }
+  try { reflector.stop(); } catch (e) { console.error('[changeHome] reflector.stop:', e); }
+
+  if (mode === 'move' && oldHome) {
+    try {
+      for (const sub of ['hive', 'palace']) {
+        const src = join(oldHome, sub);
+        if (!existsSync(src)) continue;
+        // cpSync copies the whole tree incl. .git and is cross-device safe (unlike
+        // renameSync, which throws EXDEV across volumes). We COPY, never delete —
+        // the old folder stays as a safety net the user removes manually.
+        cpSync(src, join(newHome, sub), { recursive: true, force: true, dereference: false });
+      }
+    } catch (e) {
+      // Copy failed: recover IN PLACE against the unchanged old home (config never
+      // repointed) so the user loses nothing, and surface the error — no relaunch.
+      bootstrapHiveServices();
+      const cfg = readConfig();
+      if (cfg.slackEnabled && cfg.slackSigningSecret) void startSlackServer();
+      return { ok: false, error: `Could not copy data: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  }
+
+  // Repoint config and relaunch so every service re-bootstraps against newHome.
+  // (Identical recovery path to resetAll — relaunch is the clean re-bind.)
+  allowQuit = true;
+  writeConfig({ harnessHome: newHome });
+  try { ptyManager.killAll(); } catch (e) { console.error('[changeHome] killAll:', e); }
+  app.relaunch();
+  app.exit(0);
+  return { ok: true as const }; // unreachable (process exits) — typed for the renderer
+});
+
 // ─── IPC: filesystem (sandboxed to a root) ──────────────────────────────────
 ipcMain.handle('fs:listDir', (_evt, root: unknown, rel: unknown) => {
   if (typeof root !== 'string' || typeof rel !== 'string') return { ok: false, error: 'invalid args' };
@@ -745,6 +886,27 @@ ipcMain.handle('hive:searchMemory', (_evt, query: unknown, wing: unknown) => {
 ipcMain.handle('hive:memoryWakeUp', (_evt, wing: unknown) =>
   memory.wakeUp(typeof wing === 'string' ? wing : undefined));
 ipcMain.handle('hive:mineNow', () => { memory.mineNow(); return { ok: true }; });
+// Condense memory.md on demand: an explicit id condenses that one agent (skips
+// the size trigger — a "condense now" button); no id runs a full threshold scan.
+ipcMain.handle('memory:reflectNow', (_evt, id: unknown) =>
+  reflector.reflectNow(typeof id === 'string' && id ? id : undefined));
+
+// ─── IPC: command history (SQLite — every prompt submitted to an agent) ──────
+ipcMain.handle('history:add', (_evt, payload: unknown) => {
+  const p = (payload ?? {}) as { agentId?: unknown; cwd?: unknown; text?: unknown };
+  if (typeof p.agentId !== 'string' || typeof p.text !== 'string') return { ok: false, error: 'invalid args' };
+  try {
+    persist.addHistory({ agentId: p.agentId, cwd: typeof p.cwd === 'string' ? p.cwd : null, text: p.text });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+});
+ipcMain.handle('history:list', (_evt, agentId: unknown, limit: unknown) =>
+  persist.listHistory(
+    typeof agentId === 'string' && agentId ? agentId : undefined,
+    typeof limit === 'number' ? limit : undefined
+  ));
+ipcMain.handle('history:search', (_evt, query: unknown, limit: unknown) =>
+  persist.searchHistory(typeof query === 'string' ? query : '', typeof limit === 'number' ? limit : undefined));
 
 // ─── IPC: quit confirmation ─────────────────────────────────────────────────
 ipcMain.handle('app:confirmClose', () => {
@@ -757,6 +919,8 @@ ipcMain.handle('app:confirmClose', () => {
   try { telemetry.stop(); } catch (e) { console.error('[quit] telemetry.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[quit] slack.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[quit] memory.stop:', e); }
+  try { reflector.stop(); } catch (e) { console.error('[quit] reflector.stop:', e); }
+  try { persist.close(); } catch (e) { console.error('[quit] persist.close:', e); }
   try { ptyManager.killAll(); } catch (e) { console.error('[quit] killAll:', e); }
   app.quit();
 });
@@ -774,6 +938,8 @@ ipcMain.handle('app:resetAll', () => {
   try { telemetry.stop(); } catch (e) { console.error('[reset] telemetry.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[reset] slack.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[reset] memory.stop:', e); }
+  try { reflector.stop(); } catch (e) { console.error('[reset] reflector.stop:', e); }
+  try { persist.close(); } catch (e) { console.error('[reset] persist.close:', e); }
   try { ptyManager.killAll(); } catch (e) { console.error('[reset] killAll:', e); }
   // Erase the hive (Michael's + every agent's memory, inboxes, tasks, board,
   // git history) and the semantic-memory palace. Only these harness-created
@@ -936,26 +1102,35 @@ ipcMain.handle('slack:setConfig', (_evt, patch: unknown) => {
   return { ok: true };
 });
 
+/** Start every hive-bound background service against the current harnessHome.
+ *  Called on boot, and again to recover in place if a folder-change copy fails
+ *  (config:changeHome tears these down before copying). No-op without a home. */
+function bootstrapHiveServices(): void {
+  if (!hive.enabled()) return;
+  hive.ensureHive();
+  hive.startRouter();
+  ensureDefaultMissions(); // one-time: seed the built-in hourly ops standup
+  syncMissions(); // arm recurring auto-dispatch missions now the router is live
+  hookServer.start();
+  // Bind the telemetry collector BEFORE the renderer spawns any agent, then point
+  // the hive at it so every subsequent spawn is instrumented. Best-effort — a bind
+  // failure just leaves telemetry off (transcript reconciler stays). No breaker.start():
+  // the breaker is POLICY-only, ticked by the heartbeat beat (#1, ships disabled).
+  void telemetry.start().then((r) => {
+    if (r.ok && r.endpoint) { hive.setOtelEndpoint(r.endpoint); console.log('[telemetry] collector listening', r.endpoint); }
+    else console.error('[telemetry] collector failed to start:', r.error);
+  });
+  memory.start(); // init shared palace + mine loop (no-op without mempalace)
+  reflector.start(); // bound oversized memory.md files on a timer (no-op until threshold)
+}
+
 app.whenReady().then(() => {
+  // Open the durable store first — createWindow() reads the saved window bounds.
+  // Guarded: a DB failure (e.g. a bad native build) must degrade to defaults,
+  // never block app startup.
+  try { persist.open(); } catch (e) { console.error('[db] open failed:', e); }
   // Bootstrap the hive (if harnessHome is configured) and start the message router.
-  if (hive.enabled()) {
-    hive.ensureHive();
-    hive.startRouter();
-    ensureDefaultMissions(); // one-time: seed the built-in hourly ops standup
-    syncMissions(); // arm recurring auto-dispatch missions now the router is live
-    hookServer.start();
-    // Bind the telemetry collector BEFORE the renderer spawns any agent, then
-    // point the hive at it so every subsequent spawn is instrumented. Best-effort
-    // — a bind failure just leaves telemetry off (transcript reconciler stays).
-    void telemetry.start().then((r) => {
-      if (r.ok && r.endpoint) { hive.setOtelEndpoint(r.endpoint); console.log('[telemetry] collector listening', r.endpoint); }
-      else console.error('[telemetry] collector failed to start:', r.error);
-    });
-    // No breaker.start() — the breaker is POLICY-only, ticked by the heartbeat
-    // beat (#1, ships disabled), so it's dormant until the user opts in. (Lane A
-    // #6 replaced Lane C's interim self-polling breaker at integration.)
-    memory.start(); // init shared palace + mine loop (no-op without mempalace)
-  }
+  bootstrapHiveServices();
   createWindow();
   // Auto-start the Slack webhook server when configured. Best-effort: a tunnel
   // failure (offline) is logged, not fatal. The tunnel URL is ephemeral and
