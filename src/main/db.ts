@@ -36,10 +36,15 @@ export interface CommandHistoryRow {
  * FUTURE (do NOT build in v1 — reserved so the array isn't painted into a corner):
  *   - Phase B: `agents` + `message_queue` mirror of the renderer roster/queues
  *     (dual-write), enabling the eventual authority flip off localStorage.
- *   - Cross-lane (Lane A #6 cost ledger migration onto this DB): a `cost_ledger`
- *     table — (id, agent_id, session_id, ts, model, input_tokens, output_tokens,
- *     cache_read_tokens, cache_creation_tokens, usd) — so Jim's circuit-breaker
- *     can move off transcript-polling. Additive; lands as a later migration.
+ *   - Cross-lane (Lane A #6): migrate Jim's cost ledger onto this DB so his
+ *     circuit-breaker can move off transcript-polling. Column names match his
+ *     <harnessHome>/hive/cost-ledger.jsonl keys 1:1 for a straight INSERT…SELECT
+ *     (coordinated w/ jim-mq290qkn 2026-06-06):
+ *       cost_ledger(id, agent_id, session_id TEXT, ts, input, output,
+ *                   cache_read, cache_creation, model TEXT, usd REAL)
+ *     Rows are CUMULATIVE snapshots (one per agent per heartbeat beat) — diff
+ *     consecutive rows for velocity; index (agent_id, session_id, ts). Additive;
+ *     lands as a later migration.
  */
 const MIGRATIONS: Array<(db: Database.Database) => void> = [
   // → user_version 1 (Phase A): scalar kv + net-new command history.
