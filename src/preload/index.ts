@@ -241,6 +241,11 @@ const api = {
   memoryWakeUp: (wing?: string): Promise<{ ok: boolean; output: string; error?: string }> =>
     ipcRenderer.invoke('hive:memoryWakeUp', wing),
   mineNow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('hive:mineNow'),
+  /** Condense agent memory.md files (the janitor's missing half). With an id,
+   *  condense that agent on demand; without, run a full threshold scan. Returns
+   *  the per-agent outcomes ({ id, condensed, reason, oldBytes?, newBytes? }). */
+  reflectNow: (id?: string): Promise<Array<{ id: string; condensed: boolean; reason: string; oldBytes?: number; newBytes?: number }>> =>
+    ipcRenderer.invoke('memory:reflectNow', id),
   hiveSend: (msg: Partial<HiveMessage>, from?: string): Promise<{ ok: boolean; error?: string; message?: HiveMessage }> =>
     ipcRenderer.invoke('hive:send', msg, from),
 

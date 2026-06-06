@@ -15,6 +15,7 @@ import {
 import { HiveManager, type AgentMeta, type HiveMessage, type HiveTask } from './hive';
 import { HookServer } from './hooks';
 import { MemoryManager } from './memory';
+import { MemoryReflector, type ReflectSettings } from './reflect';
 import { enrichMessage } from './assistant';
 import { readAgentUsage } from './transcript';
 import { listIssues, listCIRuns } from './github';
@@ -33,6 +34,28 @@ const hookServer = new HookServer(hive, () => liveWebContents(), () => readConfi
 const memory = new MemoryManager(
   () => readConfig().harnessHome,
   () => { const c = readConfig(); return { enabled: c.semanticMemory !== false, model: c.embeddingModel ?? 'minilm' }; }
+);
+/** Reads the reflect tunables from config each tick (defaults baked in here so a
+ *  pre-existing config.json without the keys still gets sane values). */
+function reflectSettings(): ReflectSettings {
+  const c = readConfig();
+  return {
+    enabled: c.reflectEnabled !== false,
+    intervalMs: c.reflectIntervalMs ?? 1_800_000,
+    byteTriggerPct: c.reflectByteTriggerPct ?? 50,
+    sectionTrigger: c.reflectSectionTrigger ?? 50,
+    recentKeep: c.reflectRecentKeep ?? 12,
+    minBytes: c.reflectMinBytes ?? 16_384
+  };
+}
+// Finishes the janitor's missing condense half: bounds each agent's memory.md
+// (Haiku tail-summary, backup→verify→atomic-swap) so it never grows unbounded.
+const reflector = new MemoryReflector(
+  () => readConfig().harnessHome,
+  () => readConfig().defaultCommand ?? 'claude',
+  () => memory.env(),
+  reflectSettings,
+  (event) => { try { hive.appendLog(event); } catch { /* best-effort */ } }
 );
 let mainWindow: BrowserWindow | null = null;
 
@@ -490,6 +513,10 @@ ipcMain.handle('hive:searchMemory', (_evt, query: unknown, wing: unknown) => {
 ipcMain.handle('hive:memoryWakeUp', (_evt, wing: unknown) =>
   memory.wakeUp(typeof wing === 'string' ? wing : undefined));
 ipcMain.handle('hive:mineNow', () => { memory.mineNow(); return { ok: true }; });
+// Condense memory.md on demand: an explicit id condenses that one agent (skips
+// the size trigger — a "condense now" button); no id runs a full threshold scan.
+ipcMain.handle('memory:reflectNow', (_evt, id: unknown) =>
+  reflector.reflectNow(typeof id === 'string' && id ? id : undefined));
 
 // ─── IPC: quit confirmation ─────────────────────────────────────────────────
 ipcMain.handle('app:confirmClose', () => {
@@ -501,6 +528,7 @@ ipcMain.handle('app:confirmClose', () => {
   try { hookServer.stop(); } catch (e) { console.error('[quit] hookServer.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[quit] slack.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[quit] memory.stop:', e); }
+  try { reflector.stop(); } catch (e) { console.error('[quit] reflector.stop:', e); }
   try { ptyManager.killAll(); } catch (e) { console.error('[quit] killAll:', e); }
   app.quit();
 });
@@ -517,6 +545,7 @@ ipcMain.handle('app:resetAll', () => {
   try { hookServer.stop(); } catch (e) { console.error('[reset] hookServer.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[reset] slack.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[reset] memory.stop:', e); }
+  try { reflector.stop(); } catch (e) { console.error('[reset] reflector.stop:', e); }
   try { ptyManager.killAll(); } catch (e) { console.error('[reset] killAll:', e); }
   // Erase the hive (Michael's + every agent's memory, inboxes, tasks, board,
   // git history) and the semantic-memory palace. Only these harness-created
@@ -637,6 +666,7 @@ app.whenReady().then(() => {
     syncMissions(); // arm recurring auto-dispatch missions now the router is live
     hookServer.start();
     memory.start(); // init shared palace + mine loop (no-op without mempalace)
+    reflector.start(); // bound oversized memory.md files on a timer (no-op until threshold)
   }
   createWindow();
   // Auto-start the Slack webhook server when configured. Best-effort: a tunnel
