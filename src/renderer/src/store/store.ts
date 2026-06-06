@@ -101,6 +101,12 @@ interface State {
    *  roster/floor. The hive registry retains them durably; this mirrors them for
    *  the renderer's "Archived" view. */
   archivedAgents: Agent[];
+  /** Workers from the previous session whose terminal died with the app (quit /
+   *  crash). Kept with their full spawn recipe (id, cwd, model, command) so the
+   *  user can one-click respawn them with the SAME agent id — memory, inbox and
+   *  registry entry reattach by themselves. God/assistant are excluded (they
+   *  auto-respawn). */
+  restorableAgents: Agent[];
   selectedId: string | null;
   feeds: Record<string, string[]>;
   addAgentOpen: boolean;
@@ -134,6 +140,8 @@ interface State {
   /** Permanently forget an archived agent (drops the renderer entry only; the
    *  hive registry keeps its record). */
   removeArchivedAgent: (id: string) => void;
+  /** Drop one agent from the restorable list (it was respawned or dismissed). */
+  removeRestorableAgent: (id: string) => void;
   /** Park a message for an agent. Returns nothing; the flush loop delivers it. */
   enqueueMessage: (agentId: string, text: string) => void;
   /** Drop a single queued message (user removed it, or it was just delivered). */
@@ -155,6 +163,7 @@ const LS_SIDEBAR_WIDTH = 'cth.sidebarWidth';
 const LS_SIDEBAR_TAB = 'cth.sidebarTab';
 const LS_AGENTS = 'cth.agents';
 const LS_ARCHIVED = 'cth.archivedAgents';
+const LS_RESTORABLE = 'cth.restorableAgents';
 const LS_SELECTED = 'cth.selectedId';
 const LS_QUEUES = 'cth.messageQueues';
 const LS_ENRICH = 'cth.enrichEnabled';
@@ -223,6 +232,34 @@ function loadPersistedArchived(): Agent[] {
   }
 }
 
+function persistRestorable(restorable: Agent[]): void {
+  try {
+    const slim: PersistedAgent[] = restorable.map(({ recentAssistantText, recentTextTs, blockReason, ...rest }) => {
+      void recentAssistantText; void recentTextTs; void blockReason;
+      return rest;
+    });
+    window.localStorage.setItem(LS_RESTORABLE, JSON.stringify(slim));
+  } catch { /* noop */ }
+}
+
+function loadPersistedRestorable(): Agent[] {
+  try {
+    const raw = window.localStorage.getItem(LS_RESTORABLE);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as PersistedAgent[];
+    if (!Array.isArray(parsed)) return [];
+    // No live process — clear run-state; the spawn recipe fields are what matter.
+    return parsed.map((a) => ({
+      ...a,
+      status: 'idle',
+      carrying: undefined,
+      currentStation: undefined
+    }));
+  } catch {
+    return [];
+  }
+}
+
 function persistQueues(queues: Record<string, QueuedMessage[]>): void {
   try {
     // Only keep non-empty queues so the key stays small.
@@ -277,6 +314,7 @@ const initialSidebarTab: SidebarTab = (() => {
 
 const initialAgents = loadPersistedAgents();
 const initialArchivedAgents = loadPersistedArchived();
+const initialRestorableAgents = loadPersistedRestorable();
 const initialSelectedId = loadPersistedSelectedId(initialAgents);
 const initialQueues = loadPersistedQueues();
 const initialEnrichEnabled: boolean = (() => {
@@ -294,6 +332,7 @@ function newQueuedId(): string {
 export const useStore = create<State>((set) => ({
   agents: initialAgents,
   archivedAgents: initialArchivedAgents,
+  restorableAgents: initialRestorableAgents,
   selectedId: initialSelectedId,
   feeds: {},
   addAgentOpen: false,
@@ -322,11 +361,15 @@ export const useStore = create<State>((set) => ({
       const agents = [...s.agents, agent];
       // Re-spawning an archived agent un-archives it: an id is active xor archived.
       const archivedAgents = s.archivedAgents.filter((a) => a.id !== agent.id);
+      // A live (re)spawn also consumes any restorable entry for the same id.
+      const restorableAgents = s.restorableAgents.filter((a) => a.id !== agent.id);
       persistAgents(agents, agent.id);
       persistArchived(archivedAgents);
+      if (restorableAgents.length !== s.restorableAgents.length) persistRestorable(restorableAgents);
       return {
         agents,
         archivedAgents,
+        restorableAgents,
         selectedId: agent.id,
         feeds: { ...s.feeds, [agent.id]: s.feeds[agent.id] ?? [] }
       };
@@ -372,6 +415,13 @@ export const useStore = create<State>((set) => ({
       persistArchived(archivedAgents);
       return { archivedAgents };
     }),
+  removeRestorableAgent: (id) =>
+    set((s) => {
+      if (!s.restorableAgents.some((a) => a.id === id)) return s;
+      const restorableAgents = s.restorableAgents.filter((a) => a.id !== id);
+      persistRestorable(restorableAgents);
+      return { restorableAgents };
+    }),
   enqueueMessage: (agentId, text) =>
     set((s) => {
       const trimmed = text.trim();
@@ -403,13 +453,24 @@ export const useStore = create<State>((set) => ({
       // Keep agents with no PTY (synthetic) or whose PTY is still alive.
       const agents = s.agents.filter((a) => !a.ptyId || live.has(a.ptyId));
       if (agents.length === s.agents.length) return s;
+      // Workers whose terminal died with the previous session become restorable
+      // (full spawn recipe retained) instead of silently vanishing. God and the
+      // assistant are excluded — they auto-respawn at boot.
+      const dead = s.agents.filter(
+        (a) => a.ptyId && !live.has(a.ptyId) && !a.isGod && !a.isAssistant
+      );
+      const restorableAgents = [
+        ...s.restorableAgents.filter((r) => !dead.some((d) => d.id === r.id)),
+        ...dead
+      ];
       const feeds: Record<string, string[]> = {};
       for (const a of agents) feeds[a.id] = s.feeds[a.id] ?? [];
       const selectedId = agents.some((a) => a.id === s.selectedId)
         ? s.selectedId
         : (agents[0]?.id ?? null);
       persistAgents(agents, selectedId);
-      return { agents, feeds, selectedId };
+      persistRestorable(restorableAgents);
+      return { agents, feeds, selectedId, restorableAgents };
     }),
   setAddAgentOpen: (open) => set({ addAgentOpen: open }),
   setFullscreen: (id) => set({ fullscreenAgentId: id }),
