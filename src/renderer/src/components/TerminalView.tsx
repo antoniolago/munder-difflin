@@ -3,6 +3,11 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
+// Cream-paper light theme — kept in sync with the tuned light palette in
+// PtyTerminalView.tsx. The old palette here used the dark-theme neon colours
+// (e.g. green #6BCF7F, yellow #FFD93D) which are near-invisible as foreground on
+// the cream background; these dark/deep inks read on cream, and the terminal's
+// `minimumContrastRatio` (below) keeps coloured backgrounds legible too.
 const theme = {
   background: '#FCFAF0',
   foreground: '#1A1320',
@@ -11,21 +16,21 @@ const theme = {
   selectionBackground: '#FFEC99',
   selectionForeground: '#1A1320',
   black:        '#1A1320',
-  red:          '#FF6B6B',
-  green:        '#6BCF7F',
-  yellow:       '#FFD93D',
-  blue:         '#4ECDC4',
-  magenta:      '#B197FC',
-  cyan:         '#4ECDC4',
-  white:        '#FFF8E7',
+  red:          '#D1453B',
+  green:        '#20904B',
+  yellow:       '#9C6B00',
+  blue:         '#2B6CB0',
+  magenta:      '#8A5CF0',
+  cyan:         '#1F9C94',
+  white:        '#3A2F44',
   brightBlack:  '#6B5878',
-  brightRed:    '#FFB4B4',
-  brightGreen:  '#B4E5BD',
-  brightYellow: '#FFEC99',
-  brightBlue:   '#A8E6E0',
-  brightMagenta:'#D6C5FF',
-  brightCyan:   '#A8E6E0',
-  brightWhite:  '#FFFDF5'
+  brightRed:    '#E0584E',
+  brightGreen:  '#2E9E54',
+  brightYellow: '#B8860B',
+  brightBlue:   '#3B7DC4',
+  brightMagenta:'#9B72F2',
+  brightCyan:   '#2BA89F',
+  brightWhite:  '#1A1320'
 };
 
 export interface TerminalViewProps {
@@ -50,6 +55,9 @@ export function TerminalView({ initialLines = [], feed = [] }: TerminalViewProps
       cursorStyle: 'block',
       scrollback: 5000,
       convertEol: true,
+      // Keep text legible on any program-set background colour (WCAG AA).
+      // See terminalPool.ts for the full rationale.
+      minimumContrastRatio: 4.5,
       allowProposedApi: true
     });
     const fit = new FitAddon();
