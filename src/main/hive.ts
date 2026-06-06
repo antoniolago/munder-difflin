@@ -613,14 +613,17 @@ export class HiveManager {
   appendCostLedger(sample: AgentUsageSample): void {
     const root = this.root();
     if (!root) return;
+    // Fully snake_case so the row maps 1:1 onto Kevin's (#4) cost_ledger SQLite
+    // columns (agent_id, session_id, ts, input, output, cache_read,
+    // cache_creation, model, usd) — migration is a straight INSERT…SELECT.
     const row = {
       agent_id: sample.agentId,
       session_id: sample.sessionId,
       ts: sample.ts,
       input: sample.input,
       output: sample.output,
-      cacheRead: sample.cacheRead,
-      cacheCreation: sample.cacheCreation,
+      cache_read: sample.cacheRead,
+      cache_creation: sample.cacheCreation,
       model: sample.model,
       usd: sample.usd
     };
