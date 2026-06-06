@@ -141,7 +141,14 @@ export function OfficeFloor() {
         background: hexNum(colors.ink[900]),
         antialias: false,
         roundPixels: true,
-        resolution: 1,
+        // resolution: 1 let the OS/browser upscale the canvas on scaled and
+        // HiDPI displays (125–150% is the Windows laptop default), blurring
+        // everything — worst of all the bubble text, which is small to begin
+        // with. Render at the real device pixel density instead, floored at 2
+        // so the half-scale-supersampled bubble text stays legible even at
+        // 100% scaling. autoDensity keeps the canvas CSS size in logical px.
+        resolution: Math.max(window.devicePixelRatio || 1, 2),
+        autoDensity: true,
         width: host.clientWidth || 800,
         height: host.clientHeight || 600,
       });
@@ -665,7 +672,13 @@ export function OfficeFloor() {
       const onTick = (ticker: Ticker) => {
         const dt = ticker.deltaMS / 1000;
         camera.update(dt);
-        for (const rt of runtimes.values()) rt.character.update(dt);
+        // Thought clouds counter-scale against the camera so their text never
+        // renders below 1:1 screen size when the window/world shrinks.
+        const zoom = world.scale.x;
+        for (const rt of runtimes.values()) {
+          rt.character.setBubbleZoom(zoom);
+          rt.character.update(dt);
+        }
         updateCafeteria(dt);
         resolveBubbleOverlaps();
         for (let i = envelopes.length - 1; i >= 0; i--) {
