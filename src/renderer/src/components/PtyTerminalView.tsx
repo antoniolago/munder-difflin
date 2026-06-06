@@ -48,6 +48,13 @@ const zoomBtnStyle: CSSProperties = {
 // Light theme — cream paper. The ANSI "white" / "yellow" / bright slots are
 // remapped to readable dark inks: programs that print white or pale-yellow text
 // (expecting a dark terminal) were previously invisible on the cream background.
+// A single ANSI slot has to serve both roles — coloured *foreground* on cream and
+// a coloured *background* under the dark default ink — which no fixed luminance
+// can satisfy at once. The terminal's `minimumContrastRatio` (see terminalPool.ts)
+// dynamically adjusts the per-cell foreground to keep both roles legible; these
+// values are tuned so the colours stay recognisable and read well natively. The
+// green/yellow are kept deep enough to read as text on cream (the brighter
+// variants are the lighter shades, per terminal convention).
 const lightTheme = {
   background: '#FCFAF0',
   foreground: '#1A1320',
@@ -57,16 +64,16 @@ const lightTheme = {
   selectionForeground: '#1A1320',
   black:        '#1A1320',
   red:          '#D1453B',
-  green:        '#2E9E54',
-  yellow:       '#B8860B',
+  green:        '#20904B',    // deep green → readable as text on cream
+  yellow:       '#9C6B00',    // deep amber → readable as text on cream
   blue:         '#2B6CB0',
   magenta:      '#8A5CF0',
   cyan:         '#1F9C94',
   white:        '#3A2F44',   // default "white" text → dark, so it's visible
   brightBlack:  '#6B5878',
   brightRed:    '#E0584E',
-  brightGreen:  '#3DAA62',
-  brightYellow: '#A9760A',
+  brightGreen:  '#2E9E54',
+  brightYellow: '#B8860B',
   brightBlue:   '#3B7DC4',
   brightMagenta:'#9B72F2',
   brightCyan:   '#2BA89F',
