@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
 
 /** A recurring auto-dispatched mission fired on an interval by the scheduler. */
 export interface ScheduledMission {
@@ -10,8 +11,29 @@ export interface ScheduledMission {
   to: string;
   body: string;
   enabled: boolean;
+  /** When true, the scheduler also sends `/compact` to every live terminal when
+   *  this mission fires — keeping each agent's context lean on a cadence. */
+  autoCompact?: boolean;
   lastFiredAt?: number;
 }
+
+/** The built-in hourly ops standup: god reviews who's doing what + whether tasks
+ *  are on track and agents are running, and every terminal's context is compacted.
+ *  Shipped enabled by default; users can toggle it off in the Command Center. */
+export const OPS_STANDUP_MISSION: ScheduledMission = {
+  id: 'ops-standup',
+  label: 'Hourly ops standup',
+  intervalMs: 3_600_000,
+  to: 'god',
+  body:
+    'Hourly ops standup. Review every agent: who is doing what, and confirm each ' +
+    'is still running (not stalled or idle-stale). Check the task board — are ' +
+    'in-flight tasks on track, and is anything blocked or unowned? Flag stale ' +
+    'agents and at-risk tasks, and keep the board accurate. (Terminal contexts ' +
+    'are auto-compacted as part of this standup.)',
+  enabled: true,
+  autoCompact: true
+};
 
 export interface HarnessConfig {
   /** Has the user completed the first-run onboarding? */
@@ -32,6 +54,9 @@ export interface HarnessConfig {
   embeddingModel: 'minilm' | 'embeddinggemma';
   /** Recurring auto-dispatch missions handled by the scheduler. */
   missions?: ScheduledMission[];
+  /** One-time guard: has the built-in hourly ops standup been seeded into an
+   *  existing install's missions? Prevents re-adding it after a user deletes it. */
+  opsStandupSeeded?: boolean;
   /** Fire native desktop notifications on agent lifecycle events (idle finish / waiting for input). */
   notifications?: boolean;
   /** Master toggle for the Slack → Michael's-queue integration. */
@@ -54,7 +79,7 @@ const DEFAULTS: HarnessConfig = {
   defaultCommand: 'claude',
   semanticMemory: true,
   embeddingModel: 'minilm',
-  missions: [],
+  missions: [OPS_STANDUP_MISSION],
   notifications: false,
   slackEnabled: false,
   slackSigningSecret: undefined,
@@ -112,5 +137,52 @@ export function ensureHarnessHome(path: string): { ok: boolean; error?: string }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Idempotently pre-accept Claude Code's first-run prompts so agents spawned with
+ *  `--permission-mode bypassPermissions` start cleanly. Without this, a fresh
+ *  install shows an interactive "WARNING: Bypass Permissions mode … 1. No, exit /
+ *  2. Yes, I accept" prompt that the PTY can't answer in time, so the agent exits
+ *  code 1 on its own (reported by multiple users).
+ *
+ *  Two separate gates, written only when they aren't already satisfied (so we
+ *  rarely touch files a running `claude` also writes):
+ *   1. `~/.claude/settings.json` → `skipDangerousModePermissionPrompt` +
+ *      `skipAutoPermissionPrompt` — these gate the bypass-mode warning (global).
+ *   2. `~/.claude.json` → `projects[cwd].hasTrustDialogAccepted` — the per-folder
+ *      "do you trust the files in this folder?" dialog. */
+export function ensureClaudePermissionsAccepted(cwd?: string): void {
+  const home = homedir();
+  if (!home) return;
+  // 1) Global bypass-mode warning gate.
+  try {
+    const dir = join(home, '.claude');
+    const p = join(dir, 'settings.json');
+    let s: Record<string, unknown> = {};
+    if (existsSync(p)) {
+      try { s = JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>; } catch { s = {}; }
+    }
+    if (s.skipDangerousModePermissionPrompt !== true || s.skipAutoPermissionPrompt !== true) {
+      s.skipDangerousModePermissionPrompt = true;
+      s.skipAutoPermissionPrompt = true;
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(p, JSON.stringify(s, null, 2), 'utf8');
+    }
+  } catch { /* best-effort; never block a spawn */ }
+  // 2) Per-folder trust dialog gate (only when this cwd isn't already trusted).
+  if (cwd) {
+    try {
+      const p = join(home, '.claude.json');
+      let c: { projects?: Record<string, { hasTrustDialogAccepted?: boolean }> } = {};
+      if (existsSync(p)) {
+        try { c = JSON.parse(readFileSync(p, 'utf8')); } catch { c = {}; }
+      }
+      if (c.projects?.[cwd]?.hasTrustDialogAccepted !== true) {
+        c.projects = c.projects ?? {};
+        c.projects[cwd] = { ...(c.projects[cwd] ?? {}), hasTrustDialogAccepted: true };
+        writeFileSync(p, JSON.stringify(c, null, 2), 'utf8');
+      }
+    } catch { /* best-effort */ }
   }
 }

@@ -4,8 +4,8 @@ import { rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { PtyManager, type SpawnOptions } from './pty';
 import {
-  readConfig, writeConfig, resetConfig, ensureHarnessHome,
-  type HarnessConfig, type ScheduledMission
+  readConfig, writeConfig, resetConfig, ensureHarnessHome, ensureClaudePermissionsAccepted,
+  OPS_STANDUP_MISSION, type HarnessConfig, type ScheduledMission
 } from './config';
 import { listDir, readFileText, writeFileText } from './fs';
 import {
@@ -122,6 +122,17 @@ function syncMissions(): void {
         if (hive.enabled()) {
           hive.send({ to: m.to, act: 'request', subject: m.label, body: m.body }, 'scheduler');
         }
+        // Compact every live terminal's context on this tick. Send the slash
+        // command, then a return a beat later (the input box needs the text to
+        // register before submit — mirrors the renderer's submitToPty cadence).
+        if (m.autoCompact) {
+          for (const t of ptyManager.list()) {
+            try {
+              ptyManager.write(t.id, '/compact');
+              setTimeout(() => { try { ptyManager.write(t.id, '\r'); } catch { /* pty gone */ } }, 200);
+            } catch { /* pty gone */ }
+          }
+        }
         const current = readConfig().missions ?? [];
         const next = current.map((x) =>
           x.id === m.id ? { ...x, lastFiredAt: Date.now() } : x
@@ -142,6 +153,22 @@ function syncMissions(): void {
     }, remaining);
     missionTimers.set(m.id, entry);
   }
+}
+
+/** One-time migration: ensure the built-in hourly ops standup exists for installs
+ *  that predate it. Guarded by `opsStandupSeeded` so a user who later deletes the
+ *  mission doesn't get it re-added on every boot. Stamps lastFiredAt = now so the
+ *  first standup waits a full interval instead of firing (and compacting every
+ *  terminal) immediately on launch. */
+function ensureDefaultMissions(): void {
+  const cfg = readConfig();
+  if (cfg.opsStandupSeeded) return;
+  const missions = cfg.missions ?? [];
+  const has = missions.some((m) => m.id === OPS_STANDUP_MISSION.id);
+  writeConfig({
+    missions: has ? missions : [...missions, { ...OPS_STANDUP_MISSION, lastFiredAt: Date.now() }],
+    opsStandupSeeded: true
+  });
 }
 
 /** The live renderer webContents, or null if the window is gone/destroyed.
@@ -297,6 +324,10 @@ ipcMain.handle('pty:spawn', async (_evt, opts: SpawnOptions & { hive?: AgentMeta
   // Remember which agent owns this PTY so closing the tab can archive it. A
   // live terminal means active — ensureAgent above already cleared `archived`.
   if (opts.hive?.id) ptyToAgent.set(opts.id, opts.hive.id);
+  // Pre-accept Claude Code's bypass-mode warning + folder-trust dialog so the
+  // agent (spawned with --permission-mode bypassPermissions) doesn't stall on an
+  // interactive prompt it can't answer and exit code 1. Best-effort, never blocks.
+  try { ensureClaudePermissionsAccepted(opts.cwd); } catch { /* never block spawn */ }
   return ptyManager.spawn(opts);
 });
 ipcMain.handle('pty:write', (_evt, id: string, data: string) => {
@@ -602,6 +633,7 @@ app.whenReady().then(() => {
   if (hive.enabled()) {
     hive.ensureHive();
     hive.startRouter();
+    ensureDefaultMissions(); // one-time: seed the built-in hourly ops standup
     syncMissions(); // arm recurring auto-dispatch missions now the router is live
     hookServer.start();
     memory.start(); // init shared palace + mine loop (no-op without mempalace)

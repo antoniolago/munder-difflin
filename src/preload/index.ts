@@ -81,6 +81,7 @@ export interface ScheduledMission {
   to: string;
   body: string;
   enabled: boolean;
+  autoCompact?: boolean;
   lastFiredAt?: number;
 }
 
