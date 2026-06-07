@@ -16,6 +16,14 @@
     <summary>Munder Difflin v0.2.0 is here: a Command Center overhaul, per-agent token budgets, live OpenTelemetry observability, a circuit breaker, durable SQLite persistence, and a big round of community fixes.</summary>
   </entry>
   <entry>
+    <title>One Prompt, Five PR Reviews, and an Hourly Automation — A Dogfooding Story</title>
+    <link href="https://munderdiffl.in/blog/one-prompt-automated-pr-review/" />
+    <id>https://munderdiffl.in/blog/one-prompt-automated-pr-review/</id>
+    <published>2026-06-07T00:00:00.000Z</published>
+    <updated>2026-06-07T00:00:00.000Z</updated><category term="Story" />
+    <summary>How a single prompt to the Munder Difflin god agent reviewed all open PRs and set up a recurring hourly PR reviewer — while the repo was blowing up with 400+ stars.</summary>
+  </entry>
+  <entry>
     <title>Does the June 2026 Agent SDK Change Affect Munder Difflin?</title>
     <link href="https://munderdiffl.in/blog/does-the-june-2026-agent-sdk-change-affect-munder-difflin/" />
     <id>https://munderdiffl.in/blog/does-the-june-2026-agent-sdk-change-affect-munder-difflin/</id>
@@ -478,13 +486,5 @@
     <published>2026-06-02T00:00:00.000Z</published>
     <updated>2026-06-02T00:00:00.000Z</updated><category term="Concepts" />
     <summary>Plain-English definitions of the AI coding agent terms everyone trips over — harness, orchestrator, hive, subagent, agent memory — each in one line.</summary>
-  </entry>
-  <entry>
-    <title>From One Terminal to a Team: Scaling Your Claude Code Workflow</title>
-    <link href="https://munderdiffl.in/blog/from-one-terminal-to-a-team/" />
-    <id>https://munderdiffl.in/blog/from-one-terminal-to-a-team/</id>
-    <published>2026-06-02T00:00:00.000Z</published>
-    <updated>2026-06-02T00:00:00.000Z</updated><category term="Use Cases" />
-    <summary>The workflow shift from a single Claude Code session to a coordinated team of agents — what changes, where it breaks, and the concrete before-and-after.</summary>
   </entry>
 </feed>
